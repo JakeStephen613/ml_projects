@@ -1,64 +1,35 @@
-# ===========
-# 1. IMPORTS
-# ===========
-# torch: main PyTorch library (tensors, autograd, etc.)
 import torch
-# nn: neural network layers and loss functions
 import torch.nn as nn
-# optim: optimizers (SGD, Adam, etc.)
 import torch.optim as optim
-# Data utilities for mini-batches
 from torch.utils.data import TensorDataset, DataLoader
 
 # For reproducibility: this makes random numbers repeatable
 torch.manual_seed(42)
-
-# =======================================
-# 2. HYPERPARAMETERS / CONFIG VARIABLES
-# =======================================
-# Number of samples in our synthetic dataset
 NUM_SAMPLES = 200
-
-# Batch size for training (how many samples per gradient step)
 BATCH_SIZE = 32
-
-# How many times we iterate over the entire dataset
-NUM_EPOCHS = 200
-
-# Learning rate for the optimizer (step size in parameter space)
-LEARNING_RATE = 0.1
+NUM_EPOCHS = 200 ## num times run through data
+LEARNING_RATE = 0.1 ## how much you want parameters to update, too high overshoots, too low doesnt learn
 
 
-# ================================
-# 3. CREATE A SYNTHETIC DATASET
-# ================================
-# We want to learn the relationship y = 3x + 2 + noise
-# We'll generate x values randomly and compute y from them.
-
-# Generate random x values from a normal distribution
-# shape: (NUM_SAMPLES, 1) -> 1 feature per sample
-x = torch.randn(NUM_SAMPLES, 1)
+## creation of syntethic dataset. I want it to learn relationship y = 3x^2 - 5x + 8 + noise. 
 
 # True underlying relationship (this is what our model should discover)
 true_weight = 3.0
-true_bias = 2.0
+true_weight_2 = 5.0
+true_bias = 8.0
 
 # Small random noise to make it more realistic
 noise = 0.5 * torch.randn(NUM_SAMPLES, 1)
 
-# Compute y according to the formula
-y = true_weight * x + true_bias + noise
+# shape: (NUM_SAMPLES, 1) -> 1 feature per sample
+x = torch.randn(NUM_SAMPLES, 1)
+x2 = x ** 2
+X = torch.cat([x, x2], dim=1)   
+y = true_weight_1 * x2 + true_weight_2 * x + true_bias + noise
 
-# At this point:
-#   x: input tensor with shape [NUM_SAMPLES, 1]
-#   y: target tensor with shape [NUM_SAMPLES, 1]
-
-
-# ==========================================
 # 4. WRAP DATA IN A DATASET AND DATALOADER
-# ==========================================
 # TensorDataset stores inputs and targets together.
-dataset = TensorDataset(x, y)
+dataset = TensorDataset(X, y)
 
 # DataLoader handles batching and (optionally) shuffling.
 train_loader = DataLoader(
@@ -74,27 +45,26 @@ train_loader = DataLoader(
 # We’ll build a tiny neural network with just a single Linear layer:
 #     input_dim = 1  -> one feature (x)
 #     output_dim = 1 -> one prediction (y_hat)
-class LinearRegressionModel(nn.Module):
+class NonlinearModel(nn.Module):
     def __init__(self):
-        super().__init__()  # initialize parent nn.Module
-        # nn.Linear(in_features, out_features)
-        self.linear = nn.Linear(1, 1)
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(1, 32),
+            nn.ReLU(),
+            ## first hidden layer
+            nn.Linear(32, 32),
+            nn.ReLU(),
+            ## second hidden layer
+            nn.Linear(32, 1)
+        )
 
     def forward(self, x):
-        """
-        Forward pass: defines how input x is transformed to output.
-        x: tensor of shape [batch_size, 1]
-        returns: predictions of shape [batch_size, 1]
-        """
-        return self.linear(x)
-
+        return self.net(X)
 
 # Instantiate the model
-model = LinearRegressionModel()
+model = NonlinearModel()
 
-# ====================================
 # 6. DEFINE LOSS FUNCTION + OPTIMIZER
-# ====================================
 # Mean Squared Error (MSE) is standard for regression
 criterion = nn.MSELoss()
 
@@ -150,23 +120,25 @@ for epoch in range(NUM_EPOCHS):
 
 
 # ============================
-# 8. INSPECT LEARNED PARAMETERS
+# 8. INSPECT LEARNED PARAMETERS (OPTIONAL)
 # ============================
-# After training, the model's linear layer should have weight ~3 and bias ~2
-learned_weight = model.linear.weight.item()  # weight is a 1x1 tensor
-learned_bias = model.linear.bias.item()      # bias is a scalar tensor
+# For a nonlinear network (with hidden layers), individual weights
+# are not as interpretable as in simple linear regression.
+# But we can still inspect their shapes or a summary:
 
-print("\n=== Learned parameters ===")
-print(f"True weight:   {true_weight:.3f}, Learned weight: {learned_weight:.3f}")
-print(f"True bias:     {true_bias:.3f}, Learned bias:   {learned_bias:.3f}")
+print("\n=== Model parameter summary ===")
+for name, param in model.named_parameters():
+    print(f"{name:20s} shape: {tuple(param.shape)}")
+
 
 # ============================
 # 9. TEST THE MODEL ON NEW DATA
 # ============================
-# Let's predict y for a few new x values and compare to the true formula.
+# Let's predict y for a few new x values and compare to the true *quadratic* formula
+# (without noise) for reference.
 # We'll use torch.no_grad() to tell PyTorch we don't need gradients here.
 
-model.eval()  # put the model in 'evaluation' mode (important when using layers like dropout/batchnorm)
+model.eval()  # put the model in 'evaluation' mode (important for some layers)
 
 with torch.no_grad():
     # Some new x points
@@ -175,12 +147,17 @@ with torch.no_grad():
     # Model predictions
     pred_y = model(test_x)
 
-    # True y (without noise) for comparison
-    true_y = true_weight * test_x + true_bias
+    # True y (without noise) for comparison, using the quadratic relationship:
+    # y = true_weight_1 * x^2 + true_weight_2 * x + true_bias
+    true_y = (
+        true_weight_1 * (test_x ** 2)
+        + true_weight_2 * test_x
+        + true_bias
+    )
 
 print("\n=== Predictions on new data ===")
 for i in range(len(test_x)):
     x_val = test_x[i].item()
     pred_val = pred_y[i].item()
     true_val = true_y[i].item()
-    print(f"x = {x_val:5.2f} | model y ≈ {pred_val:6.3f} | true y = {true_val:6.3f}")
+    print(f"x = {x_val:5.2f} | model y ≈ {pred_val:8.4f} | true y = {true_val:8.4f}")
